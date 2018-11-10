@@ -1,0 +1,209 @@
+---
+title:           basilica
+author:          Dennis Wollersheim 
+date:            11.10.2018
+linkcolor:       cyan
+citecolor:       grey
+output:
+  pdf_document:
+    highlight:   zenburn
+---
+```{r load_data}
+source('lib/loadFunctions.R')
+source('lib/loadData.R')
+#source('lib/loadBasilica.R')
+
+#library(devtools)
+#install_github("vqv/ggbiplot")
+#library( ggbiplot )
+
+basedir = '/mnt/pivideo/mnt/video/2018/11/'
+embeddir = paste0( basedir, '/embed/' )
+imagedir = paste0( basedir, '/images/02/' )
+
+
+if (FALSE ) {
+  library(rjson)
+  filenames <- list.files(embeddir, pattern="*.emb", full.names=TRUE) 
+  myJSON <- lapply(filenames, function(x) fromJSON(file=x)) 
+  data.frame(matrix(unlist(myJSON), ncol=2048, byrow=T)) %>% 
+    as.tibble() %>%
+    mutate( filename =str_replace( filenames, '.*/(.*).emb','\\1')) %>%
+    mutate( key=str_replace( filenames, '.*/(.*).jpg.emb','\\1')) %>%
+    select( key, everything()) %>% 
+    { . } -> df_embed_set1
+
+  save(df_embed_set1, file='data/cache/embeddings_set1.rdata')  
+} else { 
+  load(file='data/cache/embeddings_set1.rdata')  
+}
+
+read.csv('data/marked.files.txt', stringsAsFactors=FALSE) %>% 
+  as.tibble() %>%
+  mutate( filename = str_replace( filename, '^\\./','')) %>%
+  separate( filename, qc( class, filename ), sep='/') %>%
+  filter( !is.na( filename )) %>% 
+  distinct( filename, class ) %>%
+  right_join( df_embed_set1 %>% dplyr::select( filename ) ) %>%
+  mutate(  class = ifelse( is.na( class ), 0, class )) %>%
+  mutate( class = factor( class, levels=0:5, labels=qc( car, blank, bike, person, carPerson, truck))) %>% 
+  { . } -> df_category
+
+df_embed_set1 %>% 
+  inner_join( df_category ) %>% 
+  select( class, everything()) %>%
+  { . } -> df_embed_set1
+
+df_motion %>%
+  mutate( filename = str_replace( filename, '^.*/','')) %>%
+  inner_join( df_embed_set1 %>% dplyr::select( filename ) ) %>% 
+  { . } -> df_motion
+
+df_embed_set1 %>%
+  purrr::keep(is.numeric) %>%
+  prcomp(center = TRUE,scale. = TRUE) %>% 
+  { . } -> pca
+
+ggbiplot(pca,ellipse=TRUE,var.axes=FALSE,  groups=df_embed_set1$class )
+
+
+library(tree)
+
+df_embed_set1 %>%
+  dplyr::select( -key, -filename ) %>%
+  tree( class ~., data=. ) %>% 
+  { . } -> mytree 
+
+
+
+library(caret)
+set.seed(3033)
+intrain <- createDataPartition(y = df_embed_set1$class, p= 0.7, list = FALSE)
+training <- df_embed_set1[intrain,]
+testing <- df_embed_set1[-intrain,]
+
+
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+set.seed(3333)
+
+training %>%
+  dplyr::select( -key, -filename ) %>%
+  train(class ~., data = ., method = "rpart",
+                   parms = list(split = "information"),
+                   trControl=trctrl,
+                   tuneLength = 10) %>% 
+  { . } -> dtree_fit
+
+dtree_fit
+prp(dtree_fit$finalModel, box.palette = "Reds", tweak = 1.2)
+
+
+predict(dtree_fit, newdata = testing[1,])
+test_pred <- predict(dtree_fit, newdata = testing)
+confusionMatrix(test_pred, testing$class )  #check accuracy
+
+
+set.seed(3333)
+
+training %>%
+  dplyr::select( -key, -filename ) %>%
+  train(class ~., data = ., method = "rpart",
+        parms = list(split = "gini"),
+        trControl=trctrl,
+        tuneLength = 10) %>% 
+  { . } -> tree_fit_gini
+
+tree_fit_gini
+
+prp(tree_fit_gini$finalModel, box.palette = "Blues", tweak = 1.2)
+
+test_pred <- predict(tree_fit_gini, newdata = testing)
+confusionMatrix(test_pred, testing$class )  #check accuracy
+
+
+################ ################ ################ ####################
+# what is it like if I also include the df_motion data
+################ ################ ################ ####################
+
+df_motion %>%
+  select( filename, numpixel, starts_with('motion_')) %>%
+  inner_join( df_embed_set1 ) %>%
+  dplyr::select( -key, -filename ) %>% 
+  { . } -> df_motion_and_embed
+
+
+
+set.seed(3033)
+intrain <- createDataPartition(y = df_motion_and_embed$class, p= 0.7, list = FALSE)
+training <- df_motion_and_embed[intrain,]
+testing <- df_motion_and_embed[-intrain,]
+
+
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+#
+training %>%
+  train(class ~., data = ., method = "rpart",
+        parms = list(split = "information"),
+        trControl=trctrl,
+        tuneLength = 10) %>% 
+  { . } -> dtree_fit
+#
+dtree_fit
+prp(dtree_fit$finalModel, box.palette = "Reds", tweak = 1.2)
+#
+#
+predict(dtree_fit, newdata = testing[1,])
+test_pred <- predict(dtree_fit, newdata = testing)
+confusionMatrix(test_pred, testing$class )  #check accuracy
+#
+#
+set.seed(3333)
+#
+training %>%
+  train(class ~., data = ., method = "rpart",
+        parms = list(split = "gini"),
+        trControl=trctrl,
+        tuneLength = 10) %>% 
+  { . } -> tree_fit_gini
+#
+tree_fit_gini
+#
+prp(tree_fit_gini$finalModel, box.palette = "Blues", tweak = 1.2)
+#
+test_pred <- predict(tree_fit_gini, newdata = testing)
+confusionMatrix(test_pred, testing$class )  #check accuracy
+
+
+if (FALSE ) {
+
+  summary(pca)
+  glimpse(pca)
+  glimpse(pca$rotation)
+
+  ggbiplot( pca, names=FALSE )
+
+  biplot( pca )
+
+
+  library(factoextra)
+
+
+  fviz_eig(pca)
+
+
+  fviz_pca_ind(pca,
+              col.ind = "cos2", # Color by the quality of representation
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+              repel = TRUE     # Avoid text overlapping
+              )
+
+
+  fviz_pca_var(pca,
+              col.var = "contrib", # Color by contributions to the PC
+              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+              repel = TRUE     # Avoid text overlapping
+              )
+}
+
+
+```

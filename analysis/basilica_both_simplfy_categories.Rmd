@@ -1,0 +1,63 @@
+---
+title:           basilica_both_simplfy_categories
+author:          Dennis Wollersheim 
+date:            11.10.2018
+linkcolor:       cyan
+citecolor:       grey
+output:
+  pdf_document:
+    highlight:   zenburn
+---
+_
+```{r load_data}
+source('lib/loadFunctions.R')
+source('lib/loadData.R')
+
+#source('lib/loadBasilica.R')
+
+#library(devtools)
+#install_github("vqv/ggbiplot")
+#library( ggbiplot )
+
+basedir = '/store/'
+embeddir = paste0( basedir, '/embed/' )
+imagedir = paste0( basedir, '/resized/' )
+reclassdir =  paste0( basedir, '/reclass/' )
+
+
+load(file='data/cache/embeddings_set2.rdata')  
+load(file='data/cache/embeddings_set1.rdata')  
+
+df_category = read_marked_categories_set2( base_images = df_embed_set2 %>% dplyr::select( filename ))
+
+df_embed_set2 %>% 
+  inner_join( df_category ) %>% 
+  select( class, everything()) %>%
+  { . } -> df_embed_set2
+
+df_embed_set1 %>% 
+  inner_join( df_category ) %>% 
+  select( class, everything()) %>%
+  { . } -> df_embed_set1
+
+df_embed_set2 %>%
+  bind_rows( df_embed_set1 ) %>% 
+  { . } -> df_embed_long
+
+df_embed_set2 %>%
+  inner_join( df_embed_set1, by=qc(filename) ) %>% 
+  { . } -> df_embed_wide
+
+df_embed_wide %>%
+  select( -class, -key.x, -key.y, -filename ) %>%
+  logisticSVD(k=2) %>% 
+  { . } -> model_wide
+
+df_embed_long %>%
+  select( -key, -filename, -class ) %>%
+  logisticSVD(k=2) %>% 
+  { . } -> model_long
+
+############################### end data prep
+
+# todo - simplify categories

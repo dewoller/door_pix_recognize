@@ -1,0 +1,376 @@
+---
+title:           Label Images Helper
+author:          Dennis Wollersheim 
+date:            11.10.2018
+linkcolor:       cyan
+citecolor:       grey
+output:
+  pdf_document:
+    highlight:   zenburn
+---
+```{r load_data}
+
+source('lib/loadFunctions.R')
+source('lib/loadData.R')
+
+#df_motion %>% View  
+
+```
+
+
+```{r feature_engineeering}
+df_motion
+
+df_category
+
+basedir = '/mnt/pivideo/mnt/video/2018/11/'
+embeddir = paste0( basedir, '/embed/' )
+imagedir = paste0( basedir, '/images/02/' )
+
+list.files(imagedir, pattern="*[0-9].jpg", full.names=TRUE)  %>%
+data.frame( image=., stringsAsFactors=FALSE) %>%
+  mutate( key =str_replace( filenames, '.*/(.*).jpg','\\1')) %>%
+  as_tibble() %>% 
+  { . } -> filenames
+
+l
+
+df_motion %>%
+  group_by( text_event ) %>%
+  mutate( event_frame = row_number(),
+          second = ts - min( ts),
+          duration= as.hms( max( ts ) - min( ts )) 
+    ) %>%
+  group_by( text_event, second ) %>%
+  mutate( ms = frame / max( frame ), 
+         et = second + ms ) %>%
+  ungroup() %>% 
+  { . } -> df_motion
+
+df_motion %>%
+  mutate( event_time = substring( text_event, 9,14),  
+  period = ifelse(event_time > '0630' & event_time < '1930', 'day','night')) %>%
+  group_by( text_event, event_time, period) %>%
+  filter( file_type==4) %>%
+  summarise(  clip_time = min(event_time_stamp), 
+              duration= as.hms( max( ts ) - min( ts )) ,
+              nframe = n(),
+              max_pix = max(numpixel), 
+              max_ratio = max( motion_height / motion_width ), 
+              max_height = max( motion_height ),
+              max_width = max( motion_width ),
+              max_x = max( motion_X), 
+              max_y = max( motion_Y) ,
+              min_pix = min(numpixel), 
+              min_ratio = min( motion_height / motion_width ), 
+              min_height = min( motion_height ),
+              min_width = min( motion_width ),
+              min_x = min( motion_X), 
+              min_y = min( motion_Y) ,
+              mean_pix = mean(numpixel), 
+              mean_ratio = mean( motion_height / motion_width ), 
+              mean_height = mean( motion_height ),
+              mean_width = mean( motion_width ),
+              mean_x = mean( motion_X), 
+              mean_y = mean( motion_Y) ,
+              sd_pixel = sd(numpixel, na.rm=TRUE), 
+              sd_ratio = sd( motion_height / motion_width , na.rm=TRUE), 
+              sd_height = sd( motion_height ),
+              sd_width = sd( motion_width ),
+              sd_x = sd( motion_X), 
+              sd_y = sd( motion_Y) ,
+              tb=max( motion_X ) - min( motion_X ),
+              ss=max( motion_Y ) - min( motion_Y )
+            ) %>% 
+  ungroup() %>%
+  left_join( df_category, by='text_event' ) %>%
+  { . } -> df_text_event
+
+df_motion %>%
+  filter( file_type==8 ) %>%
+  select( text_event, filename )  %>% 
+  { . } -> df_movie 
+
+df_text_event %>%
+  ggplot( aes( x=max_x )) + geom_histogram()
+
+df_text_event %>%
+  count( max_x, sort=TRUE) 
+
+
+df_text_event %>%
+  filter( period == 'day' & 
+         min_x <100 & 
+         max_x > 250 & 
+         duration < 20 &
+         is.na( class )) %>%
+inner_join( df_movie ) %>%
+mutate( te = paste( 
+                  substring( text_event, 1,4 ), 
+                  substring( text_event, 5,6 ), 
+                  substring( text_event, 7,8 ), 
+                  substring( text_event, 9,10)
+                  ),
+      filename = paste0( '/mnt/pivideo/', filename ),
+      text_event = paste0( "'", text_event )
+       ) %>%
+  select( text_event, te, filename, duration, class ) %>%
+  arrange( duration ) %>%
+  write.csv( 'data/toclassify.csv', row.names=FALSE)
+
+df_motion %>% 
+  filter( file_type==4) %>%
+  group_by(text_event ) %>% 
+  do(model = lm(event_frame ~ motion_X, data = .)) %>% 
+  rowwise() %>% 
+  tidy(model) %>%
+  filter( term=='motion_X') %>%
+  select(-term) %>%
+  mutate( direction_X = ifelse( estimate<0, 'left', 'right' )) %>% 
+  mutate( speed_X = abs(estimate)) %>% 
+  { . } -> motion_X
+
+df_motion %>% 
+  filter( file_type==4) %>%
+  group_by(text_event ) %>% 
+  do(model = lm(event_frame ~ motion_Y, data = .)) %>% 
+  rowwise() %>% 
+  tidy(model) %>%
+  filter( term=='motion_Y') %>%
+  select(-term) %>%
+  mutate( direction_Y = ifelse( estimate<0, 'up', 'down' )) %>% 
+  mutate( speed_Y = abs(estimate)) %>% 
+  { . } -> motion_Y
+
+df_text_event %>%
+  left_join( motion_X ) %>%
+  rename( inconsistent_X=std.error ) %>%
+  select( -estimate, -statistic, -p.value ) %>% 
+  { . } -> df_text_event
+
+df_text_event %>%
+  left_join( motion_Y ) %>%
+  rename( inconsistent_Y=std.error ) %>%
+  select( -estimate, -statistic, -p.value ) %>% 
+  { . } -> df_text_event
+
+
+
+
+
+
+
+
+```{r pairs}
+
+# events remaining to categorise
+df_category %>% distinct( text_event )
+
+df_category %>%
+  right_join( df_text_event ) %>%
+  select( clip_time, text_event, duration, class ) %>%
+  filter( is.na( class) ) %>% 
+  select (text_event ) 
+
+
+# all pairs of variables 
+df_text_event %>%
+  inner_join( df_category ) %>%
+  ggpairs( columns=c(5,8:14), 
+          mapping=aes( color=class),
+          legend=c(1,1)
+          ) 
+
+  # all pairs of variables 
+  df_text_event %>%
+    inner_join( df_category ) %>%
+    ggpairs( columns=c(5, 8, 15:20), 
+            mapping=aes( color=class),
+            legend=c(1,1)
+            ) 
+
+    # all pairs of variables 
+    df_text_event %>%
+      inner_join( df_category ) %>%
+      ggpairs( columns=c(8,18,19,21:25 ), 
+              mapping=aes( color=class),
+              legend=c(1,1)
+              ) 
+
+      # all pairs of variables 
+      df_text_event %>%
+        inner_join( df_category ) %>%
+        ggpairs( columns=c(8,18,26:31 ), 
+                mapping=aes( color=class),
+                legend=c(1,1)
+                ) 
+
+# all pairs of variables 
+df_text_event %>%
+  inner_join( df_category ) %>%
+  ggpairs( columns=c(8,18,32:36 ), 
+          mapping=aes( color=class),
+          legend=c(1,1)
+          ) 
+
+
+# all pairs of variables 
+df_text_event %>%
+  mutate( duration=as.numeric( duration)) %>%
+  drop_na( ) %>%
+  ggpairs() %>% 
+  ggsave( '/tmp/toview.png', ., width=20, height=20, units='in', dpi=600)
+
+```
+```{r prediction}
+library( randomForest)
+library(caret)
+
+df_text_event %>%
+  inner_join( df_category ) %>%
+  select( nframe, 
+         starts_with('max'), 
+         starts_with('min'), 
+         starts_with('mean'), 
+  "tb", "ss", "inconsistent_X", "direction_X", "speed_X", "inconsistent_Y",
+  "direction_Y", "speed_Y", class) %>% 
+  drop_na() %>%
+  filter( class %in% c('c', 'p')) %>%
+  mutate( direction_X = as.factor( direction_X),
+         direction_Y = as.factor( direction_Y),
+         class=as.factor(class)) %>%
+  { . } -> df
+
+split=0.80
+inTrain <- createDataPartition(y = df$class, p = split, list = FALSE)
+training <- df[inTrain,]
+testing <- df[-inTrain,]
+
+  randomForest( y=training$class, 
+               x=dplyr::select( training, -class ),
+               ytest=testing$class,
+               xtest = dplyr::select( testing, -class ),
+                 ntree=1000 ) %>% 
+  { . } -> fit
+
+summary(fit)
+plot(fit)
+fit$confusion
+
+my=as.factor( df$class )
+mx = df %>% select( -class )
+randomForest( y=my, x= mx, ntree=100000)  -> model
+summary(model)
+
+
+plot(model)
+model$confusion
+
+library(nnet ) 
+
+df %>% 
+  select( -class ) %>%
+  names() %>%
+  paste0( collapse='+') %>%
+  formula( paste0( 'class~', . ), data=df)
+
+fit=multinom( class ~ nframe+max_pix+max_ratio+max_height+max_width+max_x+max_y+min_pix+min_ratio+min_height+min_width+min_x+min_y+mean_pix+mean_ratio+mean_height+mean_width+mean_x+mean_y+tb+ss+inconsistent_X+direction_X+speed_X+inconsistent_Y+direction_Y+speed_Y, data=df )
+
+fit
+
+
+fit=glm( class ~ max_pix+max_pix+min_ratio+mean_pix+mean_ratio+mean_height+tb, family=binomial, data=training )
+summary( fit )
+
+#fit=glm( class ~ max_ratio+max_height+max_width+min_pix+min_ratio+min_height+min_width+mean_pix+mean_ratio+mean_height+mean_width+mean_x+mean_y+tb+ss+inconsistent_X+direction_X+speed_X+inconsistent_Y+direction_Y+speed_Y,family=binomial, data=df )
+
+fit=glm( class ~ mean_pix + max_width+min_pix+min_ratio+min_height+min_width+mean_pix+mean_ratio+mean_height+mean_width+mean_x+mean_y+tb+ss+inconsistent_X+speed_X+inconsistent_Y+direction_Y+speed_Y,family=binomial, data=training )
+summary( fit )
+#
+car::vif( fit )
+
+testing %>%
+  dplyr::select( -class ) %>%
+  predict( fit, . ) %>% 
+  { . } -> predictions
+
+y_test <- testing[,'class']
+# summarize results
+confusionMatrix(predictions, y_test)
+
+
+
+as.factor( pdata>.5 )
+
+
+# naive bayes
+# load the libraries
+library(klaR)
+
+# train a naive bayes model
+model=NaiveBayes( class ~ mean_pix + max_width+min_pix+min_ratio+min_height+min_width+mean_pix+mean_ratio+mean_height+mean_width+mean_x+mean_y+tb+ss+inconsistent_X+speed_X+inconsistent_Y+direction_Y+speed_Y,family=binomial, data=training )
+# make predictions
+x_test <- testing[,1:4]
+y_test <- testing[,5]
+predictions <- predict(model, x_test)
+# summarize results
+confusionMatrix(predictions$class, y_test)
+```
+
+
+# explore ranges 
+```{r}
+
+df_motion %>%
+  distinct( text_event, duration ) %>%
+  ggplot( aes( duration ) ) + geom_histogram()
+
+
+```
+
+
+# explore directionality
+```{r}
+
+df_motion %>%
+  filter( duration<15) %>%
+  filter( file_type==4) %>%
+  ggplot( aes(event_frame, motion_X, group=text_event )) +
+  geom_line() + 
+  facet_wrap( ~duration, scales='free_x' )
+
+df_motion %>%
+  filter( duration<15) %>%
+  filter( file_type==4) %>%
+  ggplot( aes(second, motion_X, group=text_event )) +
+         geom_line() + 
+         facet_wrap( ~duration, scales='free_x' )
+
+
+df_motion %>% 
+  filter( file_type==4) %>%
+  group_by(text_event ) %>% 
+  do(model = lm(event_frame ~ motion_X, data = .)) %>% 
+  rowwise() %>% 
+  tidy(model) %>%
+  filter( term=="motion_X" ) %>%
+  mutate( direction = ifelse( estimate<0, 'down', 'up' )) %>% 
+  { . } -> motion_X
+  
+
+df_motion %>%
+  inner_join( motion_X ) %>%
+  filter( duration<15) %>%
+  filter( file_type==4) %>%
+  ggplot( aes(event_frame, motion_X, group=text_event, color=direction )) +
+  geom_line() + 
+  facet_wrap( ~duration, scales='free_x' )
+
+
+
+df_motion %>%
+  group_by( text_event ) %>%
+
+```
+
+

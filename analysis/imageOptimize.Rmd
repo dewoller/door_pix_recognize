@@ -1,0 +1,124 @@
+---
+title:           imageOptimize
+author:          Dennis Wollersheim 
+date:            11.05.2018
+linkcolor:       cyan
+citecolor:       grey
+output:
+  pdf_document:
+    highlight:   zenburn
+---
+```{r load_data}
+source('lib/loadFunctions.R')
+source('lib/loadData.R')
+
+#library(devtools)
+#install_github("vqv/ggbiplot")
+#library( ggbiplot )
+
+basedir = '/mnt/pivideo/mnt/video/2018/11/'
+embeddir = paste0( basedir, '/embed/' )
+imagedir = paste0( basedir, '/images/02/' )
+resizedir = paste0( '/store/resized/' )
+
+data.frame( filename = list.files( embeddir )) %>% 
+  as.tibble() %>%
+  mutate( filename = as.character( filename )) %>%
+  filter( startsWith( filename, '2018')) %>% 
+  mutate( filename = str_replace( filename, '.emb','')) %>%
+  { . } -> base_images 
+
+
+read.csv('data/marked.files.txt', stringsAsFactors=FALSE) %>% 
+  as.tibble() %>%
+  mutate( filename = str_replace( filename, '^\\./','')) %>%
+  separate( filename, qc( class, filename ), sep='/') %>%
+  filter( !is.na( filename )) %>% 
+  distinct( filename, class ) %>%
+  right_join( base_images ) %>%
+  mutate(  class = ifelse( is.na( class ), 0, class )) %>%
+  mutate( class = factor( class, levels=0:5, labels=qc( car, blank, bike, person, carPerson, truck))) %>% 
+  { . } -> df_category
+
+
+df_category %>% 
+  anti_join( 
+            df_category %>% 
+              count( filename, sort=TRUE ) %>%
+              filter( n>1) %>%
+              inner_join( df_category ) %>%
+              filter( class=='person' | class=='blank') 
+            ) %>% 
+  { . } -> df_category
+
+
+
+df_motion %>%
+  mutate( filename = str_replace( filename, '^.*/','')) %>%
+  mutate( full_filename = paste0( imagedir, filename)) %>%
+  inner_join( df_category ) %>%
+  { . } -> df_motion
+
+
+library(magick)
+
+offset=50
+df_motion %>%
+  mutate( 
+         crop1 = paste0( motion_width*8 + offset * 2, 'x', 
+                        motion_height*8 + offset * 2 ,'+', 
+                        pmax( round(motion_X  - motion_width/2) * 8 - offset, 0 ), '+', 
+                        pmax( round(motion_Y - motion_height/2) * 8  - offset, 0 )
+                        )  ,
+         crop = paste0( motion_width, 'x', motion_height ,'+', motion_X, '+', motion_Y ),
+         resize = ifelse( motion_width>motion_height, '256x', 'x256')) %>% 
+         { . } -> df_motion
+
+do_image = function( in_filename, out_filename, crop, resize ) {
+  cat( in_filename )
+  cat ('\n')
+  image_read(in_filename) %>% 
+    image_crop( crop ) %>% 
+    image_resize( resize ) %>%
+    image_write(out_filename)
+  NA
+}
+
+df_motion %>%
+  anti_join( data.frame( filename = list.files( resizedir ) ) ) %>%
+  rowwise() %>%
+  mutate( do_image( full_filename, paste0( resizedir, filename), crop1, resize ))
+
+
+library( magrittr )
+setwd( resizedir )
+
+df_motion %>% 
+  filter( class=='truck' ) %$%
+  paste( filename, collapse= ' ' ) %>%
+  paste('montage', ., ' -tile 5x  -geometry 64x64+1+1  /tmp/truck.jpg') %>%
+  system()
+
+df_motion %>% 
+  filter( class=='person' ) %$%
+  paste( filename, collapse= ' ' ) %>%
+   paste('montage', ., ' -tile 10x  -geometry 64x64+1+1  /tmp/person.jpg') %>%
+   system()
+
+ df_motion %>% 
+   filter( class=='person' ) %$%
+   paste( filename, collapse= ' ' ) %>
+   paste('convert -dispose previous -delay 5  ', ., ' /tmp/person.gif') %>%
+   system()
+
+ df_motion %>% 
+   filter( class=='truck' ) %$%
+   paste( full_filename, collapse= ' ' ) %>%
+   paste('convert -size 100x100 -dispose none -delay 3  ', ., ' /tmp/car.gif') %>%
+   system()
+
+```
+
+
+/mnt/pivideo/mnt/video/2018/11//images/02/20181102185800-20181102185802-02.jpg
+

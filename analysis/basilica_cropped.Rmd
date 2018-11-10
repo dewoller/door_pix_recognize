@@ -1,0 +1,237 @@
+---
+title:           basilica
+author:          Dennis Wollersheim 
+date:            11.10.2018
+linkcolor:       cyan
+citecolor:       grey
+output:
+  pdf_document:
+    highlight:   zenburn
+---
+```{r load_data}
+source('lib/loadFunctions.R')
+source('lib/loadData.R')
+
+#source('lib/loadBasilica.R')
+
+#library(devtools)
+#install_github("vqv/ggbiplot")
+#library( ggbiplot )
+
+basedir = '/store/'
+embeddir = paste0( basedir, '/embed/' )
+imagedir = paste0( basedir, '/resized/' )
+reclassdir =  paste0( basedir, '/reclass/' )
+
+
+
+if (TRUE ) {
+  library(rjson)
+  filenames <- list.files(embeddir, pattern="*.emb", full.names=TRUE) 
+  myJSON <- lapply(filenames, function(x) fromJSON(file=x)) 
+  data.frame(matrix(unlist(myJSON), ncol=2048, byrow=T)) %>% 
+    as.tibble() %>%
+    mutate( filename =str_replace( filenames, '.*/(.*).emb','\\1')) %>%
+    mutate( key=str_replace( filenames, '.*/(.*).jpg.emb','\\1')) %>%
+    select( key, everything()) %>% 
+    { . } -> df_embed_set2
+#
+  save(df_embed_set2, file='data/cache/embeddings_set2.rdata')  
+} else { 
+  load(file='data/cache/embeddings_set2.rdata')  
+}
+
+df_category = read_marked_categories_set2( base_images = df_embed_set2 %>% dplyr::select( filename ))
+
+df_embed_set2 %>% 
+  inner_join( df_category ) %>% 
+  select( class, everything()) %>%
+  { . } -> df_embed_set2
+
+df_motion %>%
+  mutate( filename = str_replace( filename, '^.*/','')) %>%
+  inner_join( df_embed_set2 %>% dplyr::select( filename ) ) %>% 
+  { . } -> df_motion
+
+df_embed_set2 %>%
+  purrr::keep(is.numeric) %>%
+  prcomp(center = TRUE,scale. = TRUE) %>% 
+  { . } -> pca
+
+ggbiplot(pca,ellipse=TRUE,var.axes=FALSE,  groups=df_embed_set2$class )
+
+
+#df_embed_set2 %>%
+#  dplyr::select( -key, -filename ) %>%
+#  tree( class ~., data=. ) %>% 
+#  { . } -> mytree 
+
+set.seed(3033)
+intrain <- createDataPartition(y = df_embed_set2$class, p= 0.7, list = FALSE)
+training <- df_embed_set2[intrain,]
+testing <- df_embed_set2[-intrain,]
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+
+
+training %>%
+#  dplyr::select( -key, -filename ) %>%
+  train(class ~., data = ., method = "rpart",
+        parms = list(split = "gini"),
+        trControl=trctrl,
+        tuneLength = 10) %>% 
+  { . } -> tree_fit_gini
+
+tree_fit_gini
+
+prp(tree_fit_gini$finalModel, box.palette = "Blues", tweak = 1.2)
+
+test_pred <- predict(tree_fit_gini, newdata = testing)
+confusionMatrix(test_pred, testing$class )  #check accuracy
+ predict(dtree_fit, newdata = testing) %>% 
+  { . } -> predictions
+
+confusionMatrix(predictions, testing$class )  #check accuracy
+
+```
+
+
+```{r df_motion_addition}
+
+################ ################ ################ ####################
+# what is it like if I also include the df_motion data
+################ ################ ################ ####################
+
+df_motion %>%
+  select( filename, numpixel, starts_with('motion_')) %>%
+  inner_join( df_embed_set2 ) %>%
+  { . } -> df_motion_and_embed
+
+
+
+set.seed(3033)
+intrain <- createDataPartition(y = df_motion_and_embed$class, p= 0.7, list = FALSE)
+training <- df_motion_and_embed[intrain,]
+testing <- df_motion_and_embed[-intrain,]
+
+
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+#
+training %>%
+  train(class ~., data = ., method = "rpart",
+        parms = list(split = "information"),
+        trControl=trctrl,
+        tuneLength = 10) %>% 
+  { . } -> dtree_fit
+#
+dtree_fit
+prp(dtree_fit$finalModel, box.palette = "Reds", tweak = 1.2)
+#
+#
+predict(dtree_fit, newdata = testing[1,])
+test_pred <- predict(dtree_fit, newdata = testing)
+confusionMatrix(test_pred, testing$class )  #check accuracy
+#
+#
+set.seed(3333)
+#
+training %>%
+  train(class ~., data = ., method = "rpart",
+        parms = list(split = "gini"),
+        trControl=trctrl,
+        tuneLength = 10) %>% 
+  { . } -> tree_fit_gini
+#
+tree_fit_gini
+#
+prp(tree_fit_gini$finalModel, box.palette = "Blues", tweak = 1.2)
+#
+test_pred <- predict(tree_fit_gini, newdata = testing)
+confusionMatrix(test_pred, testing$class )  #check accuracy
+
+```
+
+```{r generate_predictions_best_predictions}
+
+
+test_pred <- predict(tree_fit_gini, newdata = testing)
+confusionMatrix(test_pred, testing$class )  #check accuracy
+predict(dtree_fit, newdata = df_motion_and_embed) %>% 
+  { . } -> predictions
+
+confusionMatrix(predictions, df_motion_and_embed$class )  #check accuracy
+
+df_motion_and_embed %>%   
+  select( filename, class, key ) %>%
+  bind_cols( data.frame( prediction = predictions) ) %>% 
+  mutate( full_filename = paste0(imagedir, filename)  ) %>%
+  { . } -> results
+
+
+```
+
+
+```{r show_errors}
+
+
+
+show_errors = function( df, is_class, err_class ) {
+
+  df %>% 
+    filter( class == is_class ) %>%
+    filter( prediction ==  err_class ) %>% 
+    { . } -> temp
+  temp %$%
+    paste( full_filename, collapse= ' ' ) %>% 
+    paste0('montage ', ., ' -tile ', floor( nrow( temp ) ^ .5 ), 'x  -geometry 128x128+1+1  /tmp/', is_class, '_called_', err_class, '.jpg') %>%
+    system()
+
+}
+
+expand.grid( ( levels( testing$class)), ( levels( testing$class))) %>%
+  as.tibble() %>%
+  mutate( Var1 = as.character( Var1 ), Var2 = as.character( Var2 ) ) %>%
+  filter( Var1 != Var2 ) %>%
+  rowwise() %>%
+  mutate( a = show_errors( results, Var1, Var2 ))
+
+
+show_errors( results, 'car', 'person')
+
+
+```
+
+
+```{r reclassify_errors}
+
+
+
+reclassify_errors = function( df, is_class, err_class ) {
+
+  dir = paste0( reclassdir, is_class, '_misclassified' )
+  system( paste0( 'mkdir -p ', dir ))
+  system( paste0( 'mkdir -p /tmp/mov/is_really_', is_class ))
+
+  df %>% 
+    filter( class == is_class ) %>%
+    filter( prediction ==  err_class ) %>% 
+    { . } -> temp
+  temp %$%
+    paste( full_filename, collapse= ' ' ) %>% 
+    paste0('cp ', ., ' ', dir ) %>%
+    system()
+
+}
+
+expand.grid( ( levels( testing$class)), ( levels( testing$class))) %>%
+  as.tibble() %>%
+  mutate( Var1 = as.character( Var1 ), Var2 = as.character( Var2 ) ) %>%
+  filter( Var1 != Var2 ) %>%
+  rowwise() %>%
+  mutate( a = reclassify_errors( results, Var1, Var2 ))
+
+
+show_errors( results, 'car', 'person')
+
+
+```
+
