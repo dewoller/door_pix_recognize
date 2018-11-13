@@ -1,0 +1,193 @@
+---
+title:           basilica_both_caret_preprocess
+author:          Dennis Wollersheim 
+date:            11.10.2018
+linkcolor:       cyan
+citecolor:       grey
+output:
+  pdf_document:
+    highlight:   zenburn
+---
+_
+```{r load_data}
+source('lib/loadFunctions.R')
+source('lib/loadData.R')
+
+#source('lib/loadBasilica.R')
+
+#library(devtools)
+#install_github("vqv/ggbiplot")
+#library( ggbiplot )
+
+basedir = '/store/'
+embeddir = paste0( basedir, '/embed/' )
+imagedir = paste0( basedir, '/resized/' )
+reclassdir =  paste0( basedir, '/reclass/' )
+
+
+load(file='data/cache/embeddings_set2.rdata')  
+load(file='data/cache/embeddings_set1.rdata')  
+
+df_category = read_marked_categories_set2( base_images = df_embed_set2 %>% dplyr::select( filename ))
+
+df_embed_set2 %>% 
+  inner_join( df_category ) %>% 
+  select( class, everything()) %>%
+  { . } -> df_embed_set2
+
+df_embed_set1 %>% 
+  inner_join( df_category ) %>% 
+  select( class, everything()) %>%
+  { . } -> df_embed_set1
+
+df_embed_set2 %>%
+  bind_rows( df_embed_set1 ) %>% 
+  { . } -> df_embed_long
+
+
+df_motion %>% 
+ mutate( filename = str_replace( filename, '^.*/','')) %>%
+ inner_join( df_embed_long %>% distinct( filename, class )) %>% 
+ { . } -> df_motion
+
+df_motion
+
+
+############################### end data prep
+
+```
+
+test it with raw variblles
+
+```{r }
+# select out numeric variables 
+df_motion %>%
+  select( qc( class, numpixel,motion_width,motion_height,motion_X,motion_Y) ) %>% 
+  { . } -> motion_n
+
+intrain <- createDataPartition(y = motion_n$class, p= 0.7, list = FALSE)
+training <- motion_n[intrain,]
+testing <- motion_n[-intrain,]
+
+
+# fit a random forest model (using ranger)
+rf_fit <- train(class ~ ., 
+                data = training, 
+                method = "ranger",
+                preProcess=  c("center", "scale", "YeoJohnson", "nzv", "pca")
+                )
+
+
+prediction = predict(rf_fit, newdata = testing, 
+            preProcess=  c("center", "scale", "YeoJohnson", "nzv", "pca")
+            )
+
+confusionMatrix( factor(testing$class), prediction )
+
+```
+
+Now that we have predictions, see how good it is on the entire series
+
+```{r }
+
+testing %>% 
+  bind_cols( df_motion[-intrain,]  %>% select( text_event )) %>%
+  bind_cols( data.frame( prediction = prediction )) %>%
+  group_by( text_event ) %>%
+  count( class ) %>%
+  filter( n==max( n )) %>% 
+  { . } -> largest_class
+
+
+
+testing %>% 
+  bind_cols( df_motion[-intrain,]  %>% select( text_event )) %>%
+  bind_cols( data.frame( prediction = prediction )) %>%
+  group_by( text_event ) %>%
+  count( prediction ) %>%
+  filter( n==max( n )) %>% 
+  { . } -> largest_prediction
+
+largest_class %>% 
+  inner_join( largest_prediction, by='text_event' ) %>%
+  ungroup() %>% 
+  { . } -> a
+
+  confusionMatrix( factor( a$class ), a$prediction )
+
+
+
+
+
+
+
+```
+
+try some feature engineering based on the whole series variables
+
+```{r }
+
+
+library(doParallel)
+cl <- makePSOCKcluster(5)
+registerDoParallel(cl)
+
+df_motion %>%
+  group_by( text_event ) %>%
+  mutate( ms = round( frame / (max( frame ) + 1) * 10000,0),  
+         ts=as.POSIXct( paste0( event_time_stamp, '.', ms))) %>%
+  select(-ms) %>%
+  mutate( duration = as.numeric(max( ts ) - min(ts)), 
+         avg_velocity_X = (max( motion_X ) - min( motion_X )) / duration,
+         avg_velocity_Y = (max( motion_Y ) - min( motion_Y )) / duration,
+         max_height=max( motion_height ), 
+         max_width=max( motion_width ),
+         max_pixel = max( numpixel )
+         ) %>%
+  ungroup() %>%
+  select( class, numpixel:motion_Y, duration:max_pixel)  %>% 
+  mutate( class=as.factor( class )) %>%
+  { . } -> motion_n
+
+intrain <- createDataPartition(y = motion_n$class, p= 0.7, list = FALSE)
+training <- motion_n[intrain,]
+testing <- motion_n[-intrain,]
+
+MyTrainControl=trainControl(
+                            method = "repeatedcv",
+                            number=5,
+                            repeats=5
+)
+
+# fit a random forest model (using ranger)
+rf_fit <- train(class ~ ., 
+                data = training, 
+                method = "LogitBoost",
+                trControl=MyTrainControl, 
+                preProcess=  c("center", "scale"), 
+                tuneGrid = expand.grid(nIter=1:10*10) 
+                )
+#
+#
+prediction = predict(rf_fit, newdata = testing, 
+                     preProcess=  c("center", "scale", "YeoJohnson")
+                     )
+#
+confusionMatrix( factor(testing$class), prediction )
+
+#preProcess=  c("center", "scale", "YeoJohnson", "nzv", "pca")
+
+rf_fit$finalModel
+
+plot( rf_fit )
+varImp( rf_fit$finalModel )
+
+
+rf_fit
+```
+
+
+```{r }
+
+
+

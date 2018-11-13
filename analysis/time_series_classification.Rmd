@@ -1,0 +1,97 @@
+---
+title:           basilica_both_caret
+author:          Dennis Wollersheim 
+date:            11.10.2018
+linkcolor:       cyan
+citecolor:       grey
+output:
+  pdf_document:
+    highlight:   zenburn
+---
+_
+```{r load_data}
+source('lib/loadFunctions.R')
+source('lib/loadData.R')
+
+#source('lib/loadBasilica.R')
+
+#library(devtools)
+#install_github("vqv/ggbiplot")
+#library( ggbiplot )
+
+basedir = '/store/'
+embeddir = paste0( basedir, '/embed/' )
+imagedir = paste0( basedir, '/resized/' )
+reclassdir =  paste0( basedir, '/reclass/' )
+
+
+load(file='data/cache/embeddings_set2.rdata')  
+load(file='data/cache/embeddings_set1.rdata')  
+
+df_category = read_marked_categories_set2( base_images = df_embed_set2 %>% dplyr::select( filename ))
+
+df_embed_set2 %>% 
+  inner_join( df_category ) %>% 
+  select( class, everything()) %>%
+  { . } -> df_embed_set2
+
+df_embed_set1 %>% 
+  inner_join( df_category ) %>% 
+  select( class, everything()) %>%
+  { . } -> df_embed_set1
+
+df_embed_set2 %>%
+  bind_rows( df_embed_set1 ) %>% 
+  { . } -> df_embed_long
+
+df_embed_set2 %>%
+  inner_join( df_embed_set1, by=qc(filename) ) %>% 
+  { . } -> df_embed_wide
+
+
+############################### end data prep
+
+```
+
+Time series classification exploration
+
+```{r }
+library( dtw )
+
+demo(dtw)
+
+
+df_motion
+
+```
+
+
+```{r caret }
+# caret code
+library(doParallel)
+cl <- makePSOCKcluster(5)
+registerDoParallel(cl)
+
+intrain <- createDataPartition(y = df_embed_long$class, p= 0.7, list = FALSE)
+training <- df_embed_long[intrain,]
+testing <- df_embed_long[-intrain,]
+
+
+training_no_nzv_pca <- preProcess(select(training, - class), 
+                                 method = c("center", "scale", "YeoJohnson", "nzv", "pca"))
+training__no_nzv_pca
+
+
+# fit a gbm model 
+rf_fit1 <- train(class ~ ., 
+                 data = training, 
+                 method = "gbm",
+                 preProcess=  c("center", "scale",  "nzv", "pca")
+                 )
+
+
+```
+
+
+```{r }
+
