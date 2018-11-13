@@ -182,6 +182,10 @@ rf_fit$finalModel
 plot( rf_fit )
 varImp( rf_fit$finalModel )
 
+predictionModel = rf_fit$finalModel 
+
+save( predictionModel, file='data/predictionModel.rdata')
+
 
 rf_fit
 ```
