@@ -3,12 +3,15 @@
 library(RMySQL)
 library(tidyverse)
 library(caret) 
+library(hms) 
+
+source('lib/functionsMinimal.R')
 
 # set API title and description to show up in http://localhost:8000/__swagger__/
 
 #' @apiTitle Run predictions for person prediction with logitboost model
 #' @apiDescription This API takes a text_event id, looks up parameters, runs a logitboost model on them
-#' indicate if person or not
+#' indicate if person or not 
 
 # load model
 # this path would have to be adapted if you would deploy this
@@ -34,7 +37,15 @@ function(req){
 #' @get /predict
 #' @html
 #' @response 200 Returns the class of text_event (person, bike, blank, car, carperson)
-calculate_prediction <- function( text_event ) {
+
+text_event = '20181102084204'
+
+calculate_prediction <- function( text_event ) { rloa
+
+    my_db_get_query( "select * from security where text_event=?", text_event) %>% 
+    as.tibble() %>% 
+    mutate( ts = as.hms(strptime(event_time_stamp , "%Y-%m-%d %H:%M:%S"))) %>% 
+    { . } -> df_motion
 
   input_data <<- as.data.frame(cbind(input_data_num, input_data_int))
 
@@ -53,3 +64,5 @@ calculate_prediction <- function( text_event ) {
   pred_rf <<- predict(model_rf, input_data)
   as.character(pred_rf)
 }
+
+
