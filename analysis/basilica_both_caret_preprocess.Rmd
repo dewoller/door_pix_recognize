@@ -1,5 +1,5 @@
 ---
-title:           basilica_both_caret
+title:           basilica_both_caret_preprocess
 author:          Dennis Wollersheim 
 date:            11.10.2018
 linkcolor:       cyan
@@ -44,26 +44,25 @@ df_embed_set2 %>%
   bind_rows( df_embed_set1 ) %>% 
   { . } -> df_embed_long
 
-df_embed_set2 %>%
-  inner_join( df_embed_set1, by=qc(filename) ) %>% 
-  { . } -> df_embed_wide
-
 
 ############################### end data prep
 
- 
-intrain <- createDataPartition(y = df_embed_long$class, p= 0.7, list = FALSE)
+
+intrain <- createDataPartition(y = df_embed_long$class, p= 0.5, list = FALSE)
 training <- df_embed_long[intrain,]
 testing <- df_embed_long[-intrain,]
 
 
+
 # fit a random forest model (using ranger)
-rf_fit <- train(class ~ ., 
+rf_fit1 <- train(class ~ ., 
                 data = training, 
-                method = "ranger")
+                method = "ranger",
+                preProcess=  c("center", "scale",  "nzv", "pca")
+                )
 
 
 
-training_no_nzv_pca <- preProcess(select(abalone_train, - old), 
-                                 method = c("center", "scale", "YeoJohnson", "nzv", "pca"))
-training__no_nzv_pca
+
+
+preProcess=  c("center", "scale", "YeoJohnson", "nzv", "pca")
