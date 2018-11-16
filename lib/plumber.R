@@ -1,13 +1,20 @@
 # script name:
 # plumber.R
 library(RMySQL)
-library(tidyverse)
+library(magrittr)
+library(dplyr)
+library(tibble)
+library(caTools)
+library(tidyr)
 library(caret) 
 library(hms) 
+library( stringr )
 source('/code/pivideo/door_pix_recognize/lib/functionsMinimal.R')
 TEXT_EVENT = ''
 BEST_FILE = data.frame() 
 
+text_event=20181009135712
+text_event='asdf'
 # load model
 # this path would have to be adapted if you would deploy this
 load("/code/pivideo/door_pix_recognize/data/predictionModel.rdata")
@@ -22,9 +29,11 @@ load("/code/pivideo/door_pix_recognize/data/predictionModel.rdata")
 #' Log system time, request method and HTTP user agent of the incoming request
 #' @filter logger
 function(req){
-  cat("System time:", as.character(Sys.time()), "\n",
-      "Request method:", req$REQUEST_METHOD, req$PATH_INFO, "\n",
-      "HTTP user agent:", req$HTTP_USER_AGENT, "@", req$REMOTE_ADDR, "\n")
+  cat(as.character(Sys.time()), "\t", 
+      req$REQUEST_METHOD, "\t", 
+      req$PATH_INFO, "\t",
+      req$HTTP_USER_AGENT, "\t", 
+      req$REMOTE_ADDR, "\n")
   plumber::forward()
 }
 
@@ -39,16 +48,24 @@ function(req){
 #' @get /predict
 #' @html
 #' @response 200 Returns the class of text_event (person, bike, blank, car, carperson)
-calculate_prediction <<- function( text_event ) {  
+calculate_prediction <<- function( text_event="blank" ) {  
 
-    my_db_get_query( "select * from security where text_event=?", text_event) %>% 
+  if ( str_length ( text_event ) != 14 ) {
+    return('')
+    #stop('text events must be 14 long' )
+  }
+  my_db_get_query( "select * from security where text_event=?", text_event) %>% 
+    { . } -> rs
+
+  if (dim(rs)[1]==0) {
+    return('')
+    #stop('no such event')
+  }
+  rs %>%
     as.tibble() %>% 
     filter( file_type==1 ) %>%
     mutate( ts = as.hms(strptime(event_time_stamp , "%Y-%m-%d %H:%M:%S"))) %>% 
     group_by( text_event ) %>%
-    mutate( ms = round( frame / (max( frame ) + 1) * 10000,0),  
-           ts=as.POSIXct( paste0( event_time_stamp, '.', ms))) %>%
-    select(-ms) %>%
     mutate( duration = as.numeric(max( ts ) - min(ts)), 
            avg_velocity_X = (max( motion_X ) - min( motion_X )) / duration,
            avg_velocity_Y = (max( motion_Y ) - min( motion_Y )) / duration,
@@ -94,8 +111,8 @@ calculate_prediction <<- function( text_event ) {
 #' @html
 #' @response 200 Returns the best file for this text_event
 best_file <<- function( text_event ) {  
-  if (text_event != TEXT_EVENT ) {
-    a=calculate_prediction ( text_event ) 
-  }
+#  if (text_event != TEXT_EVENT ) {
+#    a=calculate_prediction ( text_event ) 
+#  }
   BEST_FILE$filename
 } 
