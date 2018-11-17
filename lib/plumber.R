@@ -11,7 +11,7 @@ library(hms)
 library( stringr )
 source('/code/pivideo/door_pix_recognize/lib/functionsMinimal.R')
 TEXT_EVENT = ''
-BEST_FILE = data.frame() 
+BEST_PICTURE = ''
 
 text_event=20181009135712
 text_event='asdf'
@@ -44,12 +44,12 @@ function(req){
 # return output as html/text
 # specify 200 (okay) return
 
+#text_event ='20181117190446'
 #' predict person given text_event id
 #' @param text_event the text_event
 #' @get /predict
 #' @html
 #' @response 200 Returns the class of text_event (person, bike, blank, car, carperson)
-#text_event ='20181117190446'
 calculate_prediction <<- function( text_event="blank" ) {  
 
   if ( str_length ( text_event ) != 14 ) {
@@ -101,19 +101,19 @@ calculate_prediction <<- function( text_event="blank" ) {
     filter( category == rv$category) %>%
     arrange( desc(  numpixel, value )) %>%
     head(1 ) %$% 
-    { filename } ->> BEST_FILE
+    { filename } ->> BEST_PICTURE
 
     as.character(rv$category)
 }
 
-#' bestfile return the best file for this text_event
+#' best_picture return the most representative picture for this text_event
 #' @param text_event the text_event
-#' @get /bestfile
+#' @get /best_picture
 #' @html
-#' @response 200 Returns the best file for this text_event
-best_file <<- function( text_event ) {  
+#' @response 200 Returns the most representative picture for this text_event
+best_picture <<- function( text_event ) {  
 #  if (text_event != TEXT_EVENT ) {
 #    a=calculate_prediction ( text_event ) 
 #  }
-  BEST_FILE
+  BEST_PICTURE
 } 
