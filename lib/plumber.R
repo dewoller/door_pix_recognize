@@ -39,6 +39,8 @@ function(req){
 #' @get /predict
 #' @html
 #' @response 200 Returns the class of text_event (person, bike, blank, car, carperson)
+
+text_event ='20181117190446'
 calculate_prediction <<- function( text_event ) {  
 
     my_db_get_query( "select * from security where text_event=?", text_event) %>% 
@@ -79,9 +81,10 @@ calculate_prediction <<- function( text_event ) {
     { . } -> rv
 
   predictions %>%
-    gather( category, value, -filename ) %>%
+    inner_join( df_motion %>% select( filename, numpixel )) %>%
+    gather( category, value, -filename, -numpixel ) %>%
     filter( category == rv$category) %>%
-    arrange( desc( value )) %>%
+    arrange( desc(  numpixel, value )) %>%
     head(1 ) %>% 
     { . } ->> BEST_FILE
 
