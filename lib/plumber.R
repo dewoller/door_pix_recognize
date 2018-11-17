@@ -28,6 +28,7 @@ load("/code/pivideo/door_pix_recognize/data/predictionModel.rdata")
 
 #' Log system time, request method and HTTP user agent of the incoming request
 #' @filter logger
+
 function(req){
   cat(as.character(Sys.time()), "\t", 
       req$REQUEST_METHOD, "\t", 
@@ -48,24 +49,17 @@ function(req){
 #' @get /predict
 #' @html
 #' @response 200 Returns the class of text_event (person, bike, blank, car, carperson)
-<<<<<<< HEAD
+#text_event ='20181117190446'
 calculate_prediction <<- function( text_event="blank" ) {  
-=======
-
-text_event ='20181117190446'
-calculate_prediction <<- function( text_event ) {  
->>>>>>> 2021a133b73a512d9df97d7e087b165a693627c5
 
   if ( str_length ( text_event ) != 14 ) {
-    return('')
-    #stop('text events must be 14 long' )
+    return('ERROR:Invalid_text_event')
   }
   my_db_get_query( "select * from security where text_event=?", text_event) %>% 
     { . } -> rs
 
   if (dim(rs)[1]==0) {
-    return('')
-    #stop('no such event')
+    return('ERROR:Missing_text_event')
   }
   rs %>%
     as.tibble() %>% 
@@ -106,8 +100,8 @@ calculate_prediction <<- function( text_event ) {
     gather( category, value, -filename, -numpixel ) %>%
     filter( category == rv$category) %>%
     arrange( desc(  numpixel, value )) %>%
-    head(1 ) %>% 
-    { . } ->> BEST_FILE
+    head(1 ) %$% 
+    { filename } ->> BEST_FILE
 
     as.character(rv$category)
 }
@@ -121,5 +115,5 @@ best_file <<- function( text_event ) {
 #  if (text_event != TEXT_EVENT ) {
 #    a=calculate_prediction ( text_event ) 
 #  }
-  BEST_FILE$filename
+  BEST_FILE
 } 
