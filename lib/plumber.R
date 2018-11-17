@@ -48,7 +48,13 @@ function(req){
 #' @get /predict
 #' @html
 #' @response 200 Returns the class of text_event (person, bike, blank, car, carperson)
+<<<<<<< HEAD
 calculate_prediction <<- function( text_event="blank" ) {  
+=======
+
+text_event ='20181117190446'
+calculate_prediction <<- function( text_event ) {  
+>>>>>>> 2021a133b73a512d9df97d7e087b165a693627c5
 
   if ( str_length ( text_event ) != 14 ) {
     return('')
@@ -96,9 +102,10 @@ calculate_prediction <<- function( text_event="blank" ) {
     { . } -> rv
 
   predictions %>%
-    gather( category, value, -filename ) %>%
+    inner_join( df_motion %>% select( filename, numpixel )) %>%
+    gather( category, value, -filename, -numpixel ) %>%
     filter( category == rv$category) %>%
-    arrange( desc( value )) %>%
+    arrange( desc(  numpixel, value )) %>%
     head(1 ) %>% 
     { . } ->> BEST_FILE
 
